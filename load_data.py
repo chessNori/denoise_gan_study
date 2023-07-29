@@ -5,17 +5,18 @@ from glob import glob
 
 
 class Data:
-    def __init__(self, number_file: int, batch_size: int, n_fft=128,
+    def __init__(self, number_file: int, batch_size: int, n_fft=128, win_size=128,
                  min_sample=250000, frame_num=2000, truncate=100):  # real frame_num = frame_num * 2
         self.path = '..\\dataset\\LibriSpeech\\train-clean-100\\'  # Speaker\Chapter\Segment
         self.number_file = number_file
         self.n_fft = n_fft
+        self.win_size = win_size
         self.frame_num = frame_num * 2
-        self.padding = n_fft * frame_num
+        self.padding = win_size * frame_num
         self.sr = 16000
         self.batch_size = batch_size
         self.truncate = truncate
-        self.phase = None
+        # self.phase = None
 
         speaker_dir = [f.path for f in os.scandir(self.path) if f.is_dir()]
 
@@ -40,8 +41,8 @@ class Data:
         self.y_data = None
 
     def rnn_shape(self, wave):  # (frame_num // truncate, 1, truncate, N // 2 + 1)
-        spectrum = librosa.stft(wave, n_fft=self.n_fft, hop_length=self.n_fft // 2, win_length=self.n_fft,
-                                window='hann')[:, :self.frame_num]  # (n_fft/2 + 1, frame_num * 2 + 1)
+        spectrum = librosa.stft(wave, n_fft=self.n_fft, hop_length=self.win_size // 2, win_length=self.win_size,
+                                window='cosine')[:, :self.frame_num]  # (n_fft/2 + 1, frame_num * 2 + 1)
         spectrum = np.transpose(spectrum, (1, 0))
         spectrum = np.reshape(spectrum, (self.frame_num // self.truncate, 1, self.truncate, self.n_fft // 2 + 1))
 
@@ -79,14 +80,22 @@ class Data:
 
         if noise is not None:
             res += noise
-        res = self.spectral_magnitude(res, noise)  # spectral magnitude(log10)
-        res = res.astype(np.float32)
 
-        val_max = max(np.abs(np.max(res)), np.abs(np.min(res)))
+        # res = self.spectral_magnitude(res, noise)  # spectral magnitude(log10)
+        # res = res.astype(np.float32)
+
+        data_real = res.real
+        data_imag = res.imag
+        data_real = data_real.astype(np.float32)
+        data_imag = data_imag.astype(np.float32)
+
+        real_max = max(np.abs(np.max(data_real)), np.abs(np.min(data_real)))
+        imag_max = max(np.abs(np.max(data_imag)), np.abs(np.min(data_imag)))
+        val_max = max(real_max, imag_max)
         if val_max > self.regularization:
             self.regularization = val_max
 
-        return res
+        return data_real, data_imag
 
     def make_noise(self, noise_name: str):
         res_temp = None
@@ -111,10 +120,10 @@ class Data:
 
         return res
 
-    def spectral_magnitude(self, spectrum, noise=None):
-        magnitude, phase = librosa.magphase(spectrum)
-        if noise is None:
-            self.phase = phase
-        # white_for_log = 1e-5
-        # magnitude = np.log10(magnitude + white_for_log)
-        return magnitude
+    # def spectral_magnitude(self, spectrum, noise=None):
+    #     magnitude, phase = librosa.magphase(spectrum)
+    #     if noise is None:
+    #         self.phase = phase
+    #     # white_for_log = 1e-5
+    #     # magnitude = np.log10(magnitude + white_for_log)
+    #     return magnitude
