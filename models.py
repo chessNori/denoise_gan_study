@@ -10,12 +10,14 @@ class GeneratorModel(Model):
         self.batch_size = batch_size
         self.truncate = truncate
 
-        self.gru = GRU(self.output_num, stateful=True, return_sequences=True)
-        self.d1 = TimeDistributed(Dense(300))
+        self.e_gru = GRU(self.output_num, stateful=True, return_sequences=True)  # Encoder
+        self.l_d = TimeDistributed(Dense(64, activation='tanh'))  # Latent
+        self.d_gru = GRU(self.output_num, stateful=True, return_sequences=True)  # Decoder
         self.d_output = TimeDistributed(Dense(self.output_num))
 
     def call(self, inputs):
-        x = self.gru(inputs)
-        x = self.d1(x)
+        x = self.e_gru(inputs)
+        x = self.l_d(x)
+        x = self.d_gru(x)
         x = self.d_output(x)
         return x

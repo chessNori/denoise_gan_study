@@ -15,7 +15,7 @@ class Data:
         self.n_fft = n_fft  # FFT N value
         self.win_size = win_size  # Window size / Sampling rate = frame size(sec)
         self.frame_num = frame_num  # How many frames will the dataset consist of?
-        self.padding = win_size * (frame_num // 2) + self.win_size * 3  # Output results file size for hearing test
+        self.padding = win_size * (frame_num // 2) + self.win_size * 2  # Output results file size for hearing test
         self.truncate = truncate
 
         speaker_dir = [f.path for f in os.scandir(self.path) if f.is_dir()]

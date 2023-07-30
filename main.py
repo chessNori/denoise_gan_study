@@ -9,16 +9,16 @@ import os
 
 batch_size = 16
 number_batch = 8
-lr = 1e-3
+lr = 1e-4
 EPOCHS = 1500
-early_stop = 4.0e-8
-N_FFT = 512
-WIN_SIZE = 320  # 20ms
+early_stop = 0.00018
+N_FFT = 256
+WIN_SIZE = 160  # 10ms
 test_pick = [False, False, False]  # [Make result wav file, Calculate SNR, Make x, y wav file]
-save_scale = 200
+save_scale = 2
 save_time = dt.datetime.now()
 save_time = save_time.strftime("%Y%m%d%H%M")
-save_time = "202307310155"
+# save_time = "202307310420"
 npy_path = '..\\results\\npy_backup\\spec_only_g\\' + save_time
 print("Folder name: ", save_time)
 
@@ -40,7 +40,7 @@ y_data_real, y_data_imag = data.load_data()
 # noise_temp = data.make_noise(noise_list[0])
 # x_data_real, x_data_imag = data.load_data(noise_temp)  # Make dataset has noise
 
-x_data_real, x_data_imag = y_data_real, y_data_imag  # x = y test
+x_data_real, x_data_imag = np.copy(y_data_real), np.copy(y_data_imag)  # x = y test
 
 y_data_real_temp, y_data_imag_temp = y_data_real, y_data_imag  # For matching shape with x_data
 # for _ in range(1, len(noise_list)):
@@ -70,7 +70,7 @@ x_data_imag /= data.regularization  # -1.0 ~ +1.0
 if test_pick[2]:
     evaluate.save_raw(save_time, x_data_real, x_data_imag, save_scale,
                       'x', len(noise_list), number_batch, 0, 0, N_FFT, WIN_SIZE)
-    evaluate.save_raw(save_time, y_data_real, y_data_imag, save_scale,
+    evaluate.save_raw(save_time, y_data_real, y_data_imag, save_scale // data.regularization,
                       'y', len(noise_list), number_batch, 0, 0, N_FFT, WIN_SIZE)
     # path_time, wave_real, wave_imag, scale, file_name, number_noise, number_batch,
     # batch, noise_number, n_fft, win_size
@@ -160,9 +160,11 @@ def single_train_step(x_data, y_data, real):
 
 def who_reset(real):
     if real:
-        _model_real.gru.reset_states()
+        _model_real.e_gru.reset_states()
+        _model_real.d_gru.reset_states()
     else:
-        _model_imag.gru.reset_states()
+        _model_imag.e_gru.reset_states()
+        _model_imag.d_gru.reset_states()
 
 
 def test(train_dataset, test_dataset, real):
