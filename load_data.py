@@ -15,7 +15,7 @@ class Data:
         self.n_fft = n_fft  # FFT N value
         self.win_size = win_size  # Window size / Sampling rate = frame size(sec)
         self.frame_num = frame_num  # How many frames will the dataset consist of?
-        self.padding = win_size * (frame_num // 2)  # Output results file size for hearing test
+        self.padding = win_size * (frame_num // 2) + self.win_size * 3  # Output results file size for hearing test
         self.truncate = truncate
 
         speaker_dir = [f.path for f in os.scandir(self.path) if f.is_dir()]
@@ -40,9 +40,9 @@ class Data:
         self.regularization = 0  # -1.0 ~ +1.0
         self.y_data = None  # Dynamic for noise addition
 
-    def rnn_shape(self, wave):  # (frame_num * N // 2 + 1) -> (frame_num // truncate, 1, truncate, N // 2 + 1)
+    def rnn_shape(self, wave):  # (frame_num, N // 2 + 1) -> (frame_num // truncate, 1, truncate, N // 2 + 1)
         spectrum = librosa.stft(wave, n_fft=self.n_fft, hop_length=self.win_size // 2, win_length=self.win_size,
-                                window='cosine')[:, :self.frame_num]  # (n_fft/2 + 1, frame_num * 2 + 1)
+                                window='cosine', center=False)[:, :self.frame_num]  # (n_fft/2 + 1, frame_num-3)
         spectrum = np.transpose(spectrum, (1, 0))
         spectrum = np.reshape(spectrum, (self.frame_num // self.truncate, 1, self.truncate, self.n_fft // 2 + 1))
 

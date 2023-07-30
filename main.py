@@ -8,21 +8,21 @@ import datetime as dt
 import os
 
 batch_size = 16
-number_batch = 4
-lr = 1e-4
+number_batch = 8
+lr = 1e-3
 EPOCHS = 1500
-early_stop = 5.0e-6
+early_stop = 4.0e-8
 N_FFT = 512
 WIN_SIZE = 320  # 20ms
 test_pick = [False, False, False]  # [Make result wav file, Calculate SNR, Make x, y wav file]
-save_scale = 50
+save_scale = 200
 save_time = dt.datetime.now()
 save_time = save_time.strftime("%Y%m%d%H%M")
-# save_time = "202307301435"
+save_time = "202307310155"
 npy_path = '..\\results\\npy_backup\\spec_only_g\\' + save_time
+print("Folder name: ", save_time)
 
-
-noise_list = ['DKITCHEN', 'OOFFICE']  # Noise folder Names
+noise_list = ['DKITCHEN']  #, 'DLIVING', 'DWASHING', 'NFIELD', 'NPARK', 'OOFFICE']  # Noise folder Names
 
 if test_pick[0]:
     evaluate.backup_test(npy_path, save_time, save_scale, len(noise_list), number_batch,
@@ -37,22 +37,22 @@ data = load_data.Data(batch_size * number_batch, batch_size, N_FFT, WIN_SIZE)
 
 y_data_real, y_data_imag = data.load_data()
 
-noise_temp = data.make_noise(noise_list[0])
-x_data_real, x_data_imag = data.load_data(noise_temp)  # Make dataset has noise
+# noise_temp = data.make_noise(noise_list[0])
+# x_data_real, x_data_imag = data.load_data(noise_temp)  # Make dataset has noise
+
+x_data_real, x_data_imag = y_data_real, y_data_imag  # x = y test
 
 y_data_real_temp, y_data_imag_temp = y_data_real, y_data_imag  # For matching shape with x_data
-for _ in range(1, len(noise_list)):
-    noise_temp = data.make_noise(noise_list[_])
-    x_data_real_temp, x_data_imag_temp = data.load_data(noise_temp)
-    x_data_real = np.concatenate((x_data_real, x_data_real_temp), axis=0)
-    x_data_imag = np.concatenate((x_data_imag, x_data_imag_temp), axis=0)
-    y_data_real = np.concatenate((y_data_real, y_data_real_temp), axis=0)
-    y_data_imag = np.concatenate((y_data_imag, y_data_imag_temp), axis=0)
+# for _ in range(1, len(noise_list)):
+#     noise_temp = data.make_noise(noise_list[_])
+#     x_data_real_temp, x_data_imag_temp = data.load_data(noise_temp)
+#     x_data_real = np.concatenate((x_data_real, x_data_real_temp), axis=0)
+#     x_data_imag = np.concatenate((x_data_imag, x_data_imag_temp), axis=0)
+#     y_data_real = np.concatenate((y_data_real, y_data_real_temp), axis=0)
+#     y_data_imag = np.concatenate((y_data_imag, y_data_imag_temp), axis=0)
 
 x_data_real /= data.regularization
-x_data_imag /= data.regularization
-y_data_real /= data.regularization
-y_data_imag /= data.regularization  # -1.0 ~ +1.0
+x_data_imag /= data.regularization  # -1.0 ~ +1.0
 
 # x_data_real_test = x_data_real[:x_data_real.shape[0]//number_batch]
 # y_data_real_test = y_data_real[:y_data_real.shape[0]//number_batch]
@@ -67,13 +67,13 @@ y_data_imag /= data.regularization  # -1.0 ~ +1.0
 # x_data_imag = x_data_imag[x_data_imag.shape[0]//number_batch:]
 # y_data_imag = y_data_imag[y_data_imag.shape[0]//number_batch:]  # Train datasets
 #
-# if test_pick[2]:
-#     evaluate.save_raw(save_time, x_data_real_test, x_data_imag_test, save_scale,
-#                       'x', len(noise_list), number_batch, 0, 0, N_FFT, WIN_SIZE)
-#     evaluate.save_raw(save_time, y_data_real_test, y_data_imag_test, save_scale,
-#                       'y', len(noise_list), number_batch, 0, 0, N_FFT, WIN_SIZE)
-#     # path_time, wave_real, wave_imag, scale, file_name, number_noise, number_batch,
-#     # batch, noise_number, n_fft, win_size
+if test_pick[2]:
+    evaluate.save_raw(save_time, x_data_real, x_data_imag, save_scale,
+                      'x', len(noise_list), number_batch, 0, 0, N_FFT, WIN_SIZE)
+    evaluate.save_raw(save_time, y_data_real, y_data_imag, save_scale,
+                      'y', len(noise_list), number_batch, 0, 0, N_FFT, WIN_SIZE)
+    # path_time, wave_real, wave_imag, scale, file_name, number_noise, number_batch,
+    # batch, noise_number, n_fft, win_size
 
 print("Data Loading is Done! (", time.time() - _start, ")")
 print('Shape of train data(x,y):', x_data_real.shape, y_data_real.shape)
@@ -86,8 +86,8 @@ train_real_dataset = tf.data.Dataset.from_tensor_slices((x_data_real, y_data_rea
 train_imag_dataset = tf.data.Dataset.from_tensor_slices((x_data_imag, y_data_imag))
 # test_imag_dataset = tf.data.Dataset.from_tensor_slices((x_data_imag_test, y_data_imag_test))
 
-_model_real = models.GeneratorModel(data.n_fft)
-_model_imag = models.GeneratorModel(data.n_fft)
+_model_real = models.GeneratorModel(data.n_fft, data.batch_size, data.truncate)
+_model_imag = models.GeneratorModel(data.n_fft, data.batch_size, data.truncate)
 
 optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
 
@@ -160,11 +160,9 @@ def single_train_step(x_data, y_data, real):
 
 def who_reset(real):
     if real:
-        _model_real.e_gru.reset_states()
-        _model_real.d_gru.reset_states()
+        _model_real.gru.reset_states()
     else:
-        _model_imag.e_gru.reset_states()
-        _model_imag.d_gru.reset_states()
+        _model_imag.gru.reset_states()
 
 
 def test(train_dataset, test_dataset, real):
@@ -184,6 +182,7 @@ def test(train_dataset, test_dataset, real):
             temp = single_train_step(x_data, y_data, real)
 
             if (len(table_temp_train) != 0) and (table_temp_train[-1] < early_stop):
+            # if epoch == EPOCHS - 1:
                 temp = np.expand_dims(temp, axis=0)
                 if i == 0:
                     res = temp

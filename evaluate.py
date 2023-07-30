@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 import numpy as np
 import librosa
-from scipy import signal
 import soundfile as sf
 import os
 
@@ -23,11 +23,12 @@ def save_raw(path_time, wave_real, wave_imag, scale, file_name, number_noise, nu
     temp = temp[noise_number*length*number_batch:length*(noise_number*number_batch+1), batch, :, :]
     temp = np.reshape(temp, (-1, n_fft//2+1))
     temp = np.transpose(temp, (1, 0))  # (spectrum, time)
+    print_spectrogram(temp)
     i_temp = temp[1:-1, :][::-1, :]
     i_temp = np.conjugate(i_temp)
     temp = np.concatenate((temp, i_temp), axis=0)
-    res = librosa.istft(temp, n_fft=n_fft, hop_length=win_size//2, win_length=win_size, window='cosine').real
-
+    res = librosa.istft(temp, n_fft=n_fft, hop_length=win_size//2,
+                        win_length=win_size, window='cosine', center=False).real
     path = '..\\results\\wav_file\\spec_only_g\\' + path_time
     os.makedirs(path, exist_ok=True)
     sf.write(path + '\\test_file_' + file_name + '.wav', res * scale, 16000)  # We use 16k sampling datasets
@@ -64,19 +65,9 @@ def backup_snr_test(path, original_signal_real, original_signal_imag):
     exit()
 
 
-def window_istft(wave, n_fft):
-    window = signal.windows.cosine(n_fft)
-    window = np.expand_dims(window, axis=-1)
-    frames = wave * window
-    frames = np.fft.ifft(frames, n_fft, axis=0)
-    # frames = np.fft.ifft(wave, n_fft, axis=0)
-    # frames *= window
-
-    res = frames[:, 0]
-    for i in range(1, wave.shape[-1]):
-        res[-(n_fft//2):] += frames[:n_fft//2, i]
-        res = np.concatenate((res, frames[n_fft//2:, i]), axis=-1)
-
-    return res
-
-
+def print_spectrogram(spec):
+    target = np.abs(spec)
+    target = np.log10(target)
+    plt.imshow(target, cmap=cm.hot)
+    plt.gca().invert_yaxis()
+    plt.show()
