@@ -6,7 +6,7 @@ from glob import glob
 
 class Data:
     def __init__(self, number_file: int, batch_size: int, n_fft: int, win_size: int,
-                 min_sample=250000, frame_num=1500, truncate=100):
+                 min_sample=250000, frame_num=2000, truncate=100):
         # min_sample: For LibriSpeech, 250KB equals about 15 seconds of file.
         self.path = '..\\dataset\\LibriSpeech\\train-clean-100\\'  # Speaker\Chapter\Segment
         self.number_file = number_file  # How many files are you going to use?
@@ -40,11 +40,11 @@ class Data:
         self.regularization = 0  # -1.0 ~ +1.0
         self.y_data = None  # Dynamic for noise addition
 
-    def rnn_shape(self, wave):  # (frame_num, N // 2 + 1) -> (frame_num // truncate, 1, truncate, N // 2 + 1)
+    def rnn_shape(self, wave):  # (frame_num, N // 2) -> (frame_num // truncate, 1, truncate, N // 2)
         spectrum = librosa.stft(wave, n_fft=self.n_fft, hop_length=self.win_size // 2, win_length=self.win_size,
-                                window='cosine', center=False)[:, :self.frame_num]  # (n_fft/2 + 1, frame_num-3)
+                                window='cosine', center=False)[1:, :self.frame_num]  # (n_fft/2, frame_num-3), cut DC
         spectrum = np.transpose(spectrum, (1, 0))
-        spectrum = np.reshape(spectrum, (self.frame_num // self.truncate, 1, self.truncate, self.n_fft // 2 + 1))
+        spectrum = np.reshape(spectrum, (self.frame_num // self.truncate, 1, self.truncate, self.n_fft // 2))
 
         return spectrum
 
@@ -79,7 +79,11 @@ class Data:
         res = self.y_data
 
         if noise is not None:
-            res += noise  # We need another method at here!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+            for i in range(0, res.shape[0], self.frame_num//self.truncate):
+                for j in range(self.batch_size):
+                    scale = adjust_snr(res[i:i+self.frame_num//self.truncate, j],
+                                       noise[i:i+self.frame_num//self.truncate, j], 4)  # Make 5dB of SNR x dataset
+                    res[i:i+self.frame_num//self.truncate, j] += noise[i:i+self.frame_num//self.truncate, j] * scale
 
         data_real = res.real.astype(np.float32)
         data_imag = res.imag.astype(np.float32)
@@ -115,3 +119,18 @@ class Data:
             res = np.concatenate((res, res_temp), axis=0)
 
         return res
+
+
+def adjust_snr(target, noise, db):  # Because of abs, it didn't return good scale value. We need bug fix
+    sum_original = np.power(np.abs(target), 2)
+    sum_noise = np.power(np.abs(noise), 2)
+    sum_original = np.sum(sum_original)
+    sum_noise = np.sum(sum_noise)
+    sum_original = np.log10(sum_original)
+    sum_noise = np.log10(sum_noise)
+    scale = np.power(10, (sum_original-sum_noise)/2-(db/20))
+    # SNR = 10 * log(power of signal(S)/power of noise(N))
+    # SNR = 10 * (log(S) - log(N) - 2 log(noise scale))
+    # log(noise scale) = (log(S) - log(N))/2 - SNR/20
+
+    return scale
