@@ -61,7 +61,7 @@ class Data:
 
         return spectrum
 
-    def load_data(self, noise=None):  # Return real and imaginary spectrum array
+    def load_data(self, noise=None, noise_snr=5):  # Return real and imaginary spectrum array
         if self.y_data is None:  # Dynamic for noise addition
             data = self.rnn_spectrogram(0)
 
@@ -74,15 +74,16 @@ class Data:
                 res_temp = data[:, self.batch_size*i:self.batch_size*(i+1)]
                 res = np.concatenate((res, res_temp), axis=0)
 
-            self.y_data = res
+            self.y_data = np.copy(res)
 
-        res = self.y_data
+        res = np.copy(self.y_data)
 
         if noise is not None:
+            # res += noise
             for i in range(0, res.shape[0], self.frame_num//self.truncate):
                 for j in range(self.batch_size):
                     scale = adjust_snr(res[i:i+self.frame_num//self.truncate, j],
-                                       noise[i:i+self.frame_num//self.truncate, j], 4)  # Make 5dB of SNR x dataset
+                                       noise[i:i+self.frame_num//self.truncate, j], noise_snr)
                     res[i:i+self.frame_num//self.truncate, j] += noise[i:i+self.frame_num//self.truncate, j] * scale
 
         data_real = res.real.astype(np.float32)

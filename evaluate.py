@@ -62,7 +62,6 @@ def backup_snr_test(path, original_signal_real, original_signal_imag):
 
     snr_value = snr(original_signal_real, original_signal_imag, wave_real, wave_imag)
     print('Result SNR dB:', snr_value, 'dB')
-    exit()
 
 
 def print_spectrogram(spec):

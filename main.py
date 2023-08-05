@@ -8,17 +8,18 @@ import datetime as dt
 import os
 
 batch_size = 16
-number_batch = 8
-lr = 2e-4
-EPOCHS = 1500
-early_stop = 0.009
-N_FFT = 512
-WIN_SIZE = 320  # 10ms
-test_pick = [True, False, False, False]  # [Make result wav file, Calculate SNR, Make x, y wav file, Load weights]
-save_scale = 3
+number_batch = 12
+lr = 5e-5
+EPOCHS = 3000
+early_stop = 1.0e-9
+N_FFT = 256
+WIN_SIZE = 160  # 20ms
+SNR = 10
+test_pick = [False, True, False, False]  # [Make result wav file, Calculate SNR, Make x, y wav file, Load weights]
+save_scale = 80
 save_time = dt.datetime.now()
 save_time = save_time.strftime("%Y%m%d%H%M")
-save_time = "202307311907"
+save_time = "202308041741"
 npy_path = '..\\results\\npy_backup\\spec_only_g\\' + save_time
 print("Folder name: ", save_time)
 
@@ -31,19 +32,19 @@ else:
     os.makedirs(npy_path, exist_ok=True)
 
 _start = time.time()
-data = load_data.Data(batch_size * number_batch, batch_size, N_FFT, WIN_SIZE)
+data = load_data.Data(batch_size * number_batch, batch_size, N_FFT, WIN_SIZE, frame_num=1000)
 #  number_file, batch_size, n_fft, win_size, min_sample=250000, frame_num=2000, truncate=100)
 
 y_data_real, y_data_imag = data.load_data()
 
 noise_temp = data.make_noise(noise_list[0])
-x_data_real, x_data_imag = data.load_data(noise_temp)  # Make dataset has noise
+x_data_real, x_data_imag = data.load_data(noise_temp, SNR)  # Make dataset has noise
 # x_data_real, x_data_imag = np.copy(y_data_real), np.copy(y_data_imag)  # x = y test
 
 y_data_real_temp, y_data_imag_temp = y_data_real, y_data_imag  # For matching shape with x_data
 for _ in range(1, len(noise_list)):
     noise_temp = data.make_noise(noise_list[_])
-    x_data_real_temp, x_data_imag_temp = data.load_data(noise_temp)
+    x_data_real_temp, x_data_imag_temp = data.load_data(noise_temp, SNR)
     x_data_real = np.concatenate((x_data_real, x_data_real_temp), axis=0)
     x_data_imag = np.concatenate((x_data_imag, x_data_imag_temp), axis=0)
     y_data_real = np.concatenate((y_data_real, y_data_real_temp), axis=0)
@@ -73,18 +74,20 @@ if test_pick[1]:
     evaluate.backup_snr_test(npy_path, y_data_real_test, y_data_imag_test)
 
 if test_pick[2]:
-    evaluate.save_raw(save_time, x_data_real_test, x_data_imag_test, save_scale,
-                      'x', len(noise_list), 0, 0, N_FFT, WIN_SIZE)
-    evaluate.save_raw(save_time, y_data_real_test, y_data_imag_test, save_scale // data.regularization,
+    evaluate.save_raw(save_time, y_data_real_test, y_data_imag_test, save_scale / data.regularization,
                       'y', len(noise_list), 0, 0, N_FFT, WIN_SIZE)
-    # path_time, wave_real, wave_imag, scale, file_name, number_noise, number_batch,
-    # batch, noise_number, n_fft, win_size
+    evaluate.save_raw(save_time, x_data_real_test, x_data_imag_test, save_scale,
+                      'x0', len(noise_list), 0, 0, N_FFT, WIN_SIZE)
+    evaluate.save_raw(save_time, x_data_real_test, x_data_imag_test, save_scale,
+                      'x2', len(noise_list), 0, 2, N_FFT, WIN_SIZE)
+    # path_time, wave_real, wave_imag, scale, file_name, number_noise, batch, noise_number, n_fft, win_size
 
 print("Data Loading is Done! (", time.time() - _start, ")")
 print('Shape of train data(x,y):', x_data_real.shape, y_data_real.shape)
 print('Shape of test data(x,y):', x_data_real_test.shape, y_data_real_test.shape)
 print('Regularization:', data.regularization)
-print("SNR of x vs y: 5 dB")  # Need to bug fix
+print("SNR of x vs y: ", evaluate.snr(y_data_real_test, y_data_imag_test,
+                                      x_data_real_test * data.regularization, x_data_imag_test * data.regularization))
 
 train_real_dataset = tf.data.Dataset.from_tensor_slices((x_data_real, y_data_real))
 test_real_dataset = tf.data.Dataset.from_tensor_slices((x_data_real_test, y_data_real_test))
@@ -203,7 +206,8 @@ def test(train_dataset, test_dataset, real):
 
             temp = single_test_step(x_data, y_data, real)
 
-            if (len(table_temp_test) != 0) and (table_temp_test[-1] < early_stop):
+            # if (len(table_temp_test) != 0) and (table_temp_test[-1] < early_stop):
+            if epoch == EPOCHS - 1:
                 temp = np.expand_dims(temp, axis=0)
                 if i == 0:
                     res = temp
@@ -245,8 +249,10 @@ test(train_real_dataset, test_real_dataset, True)
 print("Start training imaginary part")
 test(train_imag_dataset, test_imag_dataset, False)
 
+evaluate.backup_snr_test(npy_path, y_data_real_test, y_data_imag_test)
+
 os.makedirs(save_path_base, exist_ok=True)
 
-evaluate.backup_test(npy_path, save_time, save_scale, len(noise_list), 0, N_FFT, WIN_SIZE, False)
-# _model_real.save_weights(save_path_real)
-# _model_imag.save_weights(save_path_imag)
+evaluate.backup_test(npy_path, save_time, save_scale/data.regularization, len(noise_list), 0, N_FFT, WIN_SIZE, False)
+_model_real.save_weights(save_path_real)
+_model_imag.save_weights(save_path_imag)

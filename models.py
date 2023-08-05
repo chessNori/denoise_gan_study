@@ -1,5 +1,5 @@
 import tensorflow as tf
-from tensorflow.keras.layers import GRU, Dense, Conv2D, TimeDistributed
+from tensorflow.keras.layers import GRU, Dense, TimeDistributed
 from tensorflow.keras import Model
 
 
@@ -11,9 +11,9 @@ class GeneratorModel(Model):
         self.truncate = truncate
 
         self.e_gru = GRU(self.output_num, stateful=True, return_sequences=True)  # Encoder
-        self.e_d = TimeDistributed(Dense(self.output_num//2, activation='tanh'))
-        self.l_d = TimeDistributed(Dense(self.output_num//4, activation='tanh'))  # Latent
-        self.d_d = TimeDistributed(Dense(self.output_num//2, activation='tanh'))  # Decoder
+        self.e_d = TimeDistributed(Dense(100, activation='tanh'))
+        self.l_d = TimeDistributed(Dense(80, activation='tanh'))  # Latent
+        self.d_d = TimeDistributed(Dense(100, activation='tanh'))  # Decoder
         self.d_gru = GRU(self.output_num, stateful=True, return_sequences=True)
         self.d_output = TimeDistributed(Dense(self.output_num))
 
