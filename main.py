@@ -10,16 +10,16 @@ import os
 batch_size = 16
 number_batch = 12
 lr = 5e-5
-EPOCHS = 3000
-early_stop = 1.0e-9
+EPOCHS = 5000
+early_stop = 0.0005
 N_FFT = 256
 WIN_SIZE = 160  # 20ms
 SNR = 10
-test_pick = [False, True, False, False]  # [Make result wav file, Calculate SNR, Make x, y wav file, Load weights]
-save_scale = 80
+test_pick = [False, False, True, False]  # [Make result wav file, Calculate SNR, Make x, y wav file, Load weights]
+save_scale = 2
 save_time = dt.datetime.now()
 save_time = save_time.strftime("%Y%m%d%H%M")
-save_time = "202308041741"
+# save_time = "202308041741"
 npy_path = '..\\results\\npy_backup\\spec_only_g\\' + save_time
 print("Folder name: ", save_time)
 
@@ -52,6 +52,8 @@ for _ in range(1, len(noise_list)):
 
 x_data_real /= data.regularization
 x_data_imag /= data.regularization  # -1.0 ~ +1.0
+y_data_real /= data.regularization
+y_data_imag /= data.regularization
 
 
 def slicing_datasets(x):
@@ -74,11 +76,11 @@ if test_pick[1]:
     evaluate.backup_snr_test(npy_path, y_data_real_test, y_data_imag_test)
 
 if test_pick[2]:
-    evaluate.save_raw(save_time, y_data_real_test, y_data_imag_test, save_scale / data.regularization,
+    evaluate.save_raw(save_time, y_data_real_test, y_data_imag_test, save_scale,
                       'y', len(noise_list), 0, 0, N_FFT, WIN_SIZE)
-    evaluate.save_raw(save_time, x_data_real_test, x_data_imag_test, save_scale,
+    evaluate.save_raw(save_time, x_data_real_test, x_data_imag_test, save_scale * data.regularization,
                       'x0', len(noise_list), 0, 0, N_FFT, WIN_SIZE)
-    evaluate.save_raw(save_time, x_data_real_test, x_data_imag_test, save_scale,
+    evaluate.save_raw(save_time, x_data_real_test, x_data_imag_test, save_scale * data.regularization,
                       'x2', len(noise_list), 0, 2, N_FFT, WIN_SIZE)
     # path_time, wave_real, wave_imag, scale, file_name, number_noise, batch, noise_number, n_fft, win_size
 
@@ -206,8 +208,8 @@ def test(train_dataset, test_dataset, real):
 
             temp = single_test_step(x_data, y_data, real)
 
-            # if (len(table_temp_test) != 0) and (table_temp_test[-1] < early_stop):
-            if epoch == EPOCHS - 1:
+            if (len(table_temp_test) != 0) and (table_temp_test[-1] < early_stop):
+            # if epoch == EPOCHS - 1:
                 temp = np.expand_dims(temp, axis=0)
                 if i == 0:
                     res = temp
@@ -253,6 +255,6 @@ evaluate.backup_snr_test(npy_path, y_data_real_test, y_data_imag_test)
 
 os.makedirs(save_path_base, exist_ok=True)
 
-evaluate.backup_test(npy_path, save_time, save_scale/data.regularization, len(noise_list), 0, N_FFT, WIN_SIZE, False)
+evaluate.backup_test(npy_path, save_time, save_scale, len(noise_list), 0, N_FFT, WIN_SIZE, False)
 _model_real.save_weights(save_path_real)
 _model_imag.save_weights(save_path_imag)
