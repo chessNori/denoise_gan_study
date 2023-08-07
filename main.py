@@ -12,23 +12,22 @@ number_batch = 15
 gen_lr = 1e-5
 disc_lr = 1e-4
 single_lr = 5e-5
-EPOCHS = 500
-pre_training_stop = 0.01
-phase_shift_loss = 1e-3
+EPOCHS = 61
+pre_training_stop = 0.008
+phase_shift_loss = 0.008
 early_stop = 5e-4
-wait_threshold = 15
 N_FFT = 256
 WIN_SIZE = 160  # 20ms
-SNR = 20
+SNR = 5
 save_scale = 3
 save_time = dt.datetime.now()
 save_time = save_time.strftime("%Y%m%d%H%M")
-# save_time = "202308051634"
+# save_time = "202308071343"
 npy_path = '..\\results\\npy_backup\\spec_only_g\\' + save_time
 print("Folder name: ", save_time)
 noise_list = ['DKITCHEN', 'DWASHING', 'NFIELD', 'OOFFICE']  # Noise folder Names
 
-test_pick = [False, False, True, False]
+test_pick = [False, False, False, False]
 # [Make result wav file, Calculate SNR, Make x, y wav file, Load weights]
 
 if test_pick[0]:
@@ -39,7 +38,7 @@ else:
 
 _start = time.time()
 data = load_data.Data(batch_size * number_batch, batch_size, N_FFT, WIN_SIZE, frame_num=1000)
-#  number_file, batch_size, n_fft, win_size, min_sample=250000, frame_num=2000, truncate=100)
+#  number_file, batch_size, n_fft, win_size, min_sample=250000, frame_num=1000, truncate=100)
 
 y_data_real, y_data_imag = data.load_data()
 
@@ -104,8 +103,8 @@ save_path_base = '..\\results\\saved_model\\spec_only_g\\' + save_time
 save_path_real = save_path_base + '\\_model_real'
 save_path_imag = save_path_base + '\\_model_imag'
 
-_model_real = models.GAN(data.n_fft)
-_model_imag = models.GAN(data.n_fft)
+_model_real = models.GAN(data.n_fft, data.regularization)
+_model_imag = models.GAN(data.n_fft, data.regularization)
 
 if test_pick[3]:
     _model_real.load_weights(save_path_real)
@@ -265,31 +264,20 @@ def gan_train_step(noisy_wave, original_wave, train_generator, model):
 
 
 def gan_learning(train_dataset, test_dataset, model, real):
-    global wait_threshold
-    temp_loss = .0
+    threshold = phase_shift_loss
+    single_phase = False
     bad_generator = False  # For changing training phase(Discriminator training first)
-    wait = wait_threshold
     res = None
+    count = 3
 
     for epoch in range(EPOCHS):
-        wrong_discriminator = False  # Do model need to single training?
         start = time.time()
 
         if res is None:
-            if bad_generator and (temp_loss < reference_loss.result()):
-                wait -= 1  # previous loss < train_loss
-                if wait == 0:
-                    wrong_discriminator = True
-                    print("Wrong!")
-                    wait_threshold -= 1
-                    wait = wait_threshold  # reset wait value
-                    bad_generator = not bad_generator
-                    # Changing loss only happens when training generator. It will stop generator training phase.
-            if train_loss.result() < phase_shift_loss:
+            if train_loss.result() < threshold:
                 bad_generator = not bad_generator  # Changing phase
-                wait = wait_threshold
+                threshold = train_loss.result() / 1.1
 
-            temp_loss = reference_loss.result()
             train_loss.reset_state()
             test_loss.reset_state()
             reference_loss.reset_state()
@@ -300,7 +288,8 @@ def gan_learning(train_dataset, test_dataset, model, real):
             for x_data, y_data in train_dataset:
                 if (i != 0) and (i % (data.frame_num // data.truncate) == 0):
                     reset_gru(model)
-                if wrong_discriminator:
+
+                if single_phase:
                     single_train_step(x_data, y_data, real)
                 else:
                     gan_train_step(x_data, y_data, bad_generator, model)
@@ -313,7 +302,7 @@ def gan_learning(train_dataset, test_dataset, model, real):
 
                 res_temp = single_test_step(x_data, y_data, real)
 
-                if (epoch < EPOCHS - 20) and ((test_loss.result() < early_stop) or (epoch == EPOCHS - 1)):
+                if ((epoch > EPOCHS - 10) and single_phase) or (epoch == EPOCHS - 2):
                     res_temp = np.expand_dims(res_temp, axis=0)
                     if i == 0:
                         res = res_temp
@@ -325,10 +314,16 @@ def gan_learning(train_dataset, test_dataset, model, real):
             reset_gru(model)
 
             print(f'Epoch {epoch + 1} (', end='')
-            if wrong_discriminator:
+            if single_phase:
                 print("Single train phase)")
+                single_phase = False
             elif bad_generator:
                 print("Generator train phase)")
+                count -= 1
+                if count == 0:
+                    bad_generator = not bad_generator
+                    count = 3
+                    single_phase = True
             else:
                 print("Discriminator train phase)")
             print(
@@ -350,7 +345,6 @@ def gan_learning(train_dataset, test_dataset, model, real):
 
 print("Start training real part.")
 gan_learning(train_real_dataset, test_real_dataset, _model_real, True)
-wait_threshold = 15
 print("Start training imaginary part")
 gan_learning(train_imag_dataset, test_imag_dataset, _model_imag, False)
 

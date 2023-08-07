@@ -10,10 +10,10 @@ class GeneratorModel(Model):
 
         self.e_gru = GRU(self.output_num, stateful=True, return_sequences=True)  # Encoder
         self.e_d = TimeDistributed(Dense(100, activation='tanh'))
-        self.l_d = TimeDistributed(Dense(20, activation='tanh'))  # Latent
+        self.l_d = TimeDistributed(Dense(25, activation='tanh'))  # Latent
         self.d_d = TimeDistributed(Dense(100, activation='tanh'))  # Decoder
         self.d_gru = GRU(self.output_num, stateful=True, return_sequences=True)
-        self.d_output = TimeDistributed(Dense(self.output_num, 'tanh'))
+        self.d_output = TimeDistributed(Dense(self.output_num))
 
     def call(self, inputs):
         x = self.e_gru(inputs)
@@ -28,12 +28,12 @@ class GeneratorModel(Model):
 class DiscriminatorModel(Model):
     def __init__(self):
         super(DiscriminatorModel, self).__init__()
-        self.conv1 = Conv2D(8, 9)
-        self.conv2 = Conv2D(16, 9)
-        self.max_pool = MaxPool2D(pool_size=(9, 9))
-        self.conv3 = Conv2D(1, 5)
+        self.conv1 = Conv2D(8, 5, activation='tanh')
+        self.conv2 = Conv2D(16, 3, activation='tanh')
+        self.max_pool = MaxPool2D(pool_size=(3, 3))
+        self.conv3 = Conv2D(1, 3, activation='tanh')
         self.flatten = Flatten()
-        self.d = Dense(20)
+        self.d = Dense(20, activation='relu')
         self.result = Dense(1, activation='sigmoid')
 
     def call(self, inputs):
@@ -50,16 +50,17 @@ class DiscriminatorModel(Model):
 
 
 class GAN(Model):
-    def __init__(self, n_fft):
+    def __init__(self, n_fft, regularization):
         super(GAN, self).__init__()
+        self.regularization = regularization
         self.generator = GeneratorModel(n_fft)
         self.discriminator = DiscriminatorModel()
 
     def call(self, inputs, generator_train):
         if generator_train:
             denoise = self.generator(inputs)
-            x = self.discriminator(denoise)
+            x = self.discriminator(denoise / self.regularization)
             return denoise, x
         else:
-            x = self.discriminator(inputs)
+            x = self.discriminator(inputs / self.regularization)
             return x

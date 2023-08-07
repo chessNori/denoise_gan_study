@@ -6,7 +6,7 @@ from glob import glob
 
 class Data:
     def __init__(self, number_file: int, batch_size: int, n_fft: int, win_size: int,
-                 min_sample=250000, frame_num=2000, truncate=100):
+                 min_sample=250000, frame_num=1000, truncate=100):
         # min_sample: For LibriSpeech, 250KB equals about 15 seconds of file.
         self.path = '..\\dataset\\LibriSpeech\\train-clean-100\\'  # Speaker\Chapter\Segment
         self.number_file = number_file  # How many files are you going to use?
@@ -79,7 +79,6 @@ class Data:
         res = np.copy(self.y_data)
 
         if noise is not None:
-            # res += noise
             for i in range(0, res.shape[0], self.frame_num//self.truncate):
                 for j in range(self.batch_size):
                     scale = adjust_snr(res[i:i+self.frame_num//self.truncate, j],
