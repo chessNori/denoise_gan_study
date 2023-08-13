@@ -5,18 +5,15 @@ from glob import glob
 
 
 class Data:
-    def __init__(self, number_file: int, batch_size: int, n_fft: int, win_size: int,
-                 min_sample=250000, frame_num=2000, truncate=100):
+    def __init__(self, number_file: int, win_size: int,
+                 min_sample=250000, frame_num=1000):
         # min_sample: For LibriSpeech, 250KB equals about 15 seconds of file.
         self.path = '..\\dataset\\LibriSpeech\\train-clean-100\\'  # Speaker\Chapter\Segment
         self.number_file = number_file  # How many files are you going to use?
-        self.batch_size = batch_size  # Must be less than 16 because of Demand dataset
         self.sr = 16000  # We use 16k sampling datasets
-        self.n_fft = n_fft  # FFT N value
         self.win_size = win_size  # Window size / Sampling rate = frame size(sec)
         self.frame_num = frame_num  # How many frames will the dataset consist of?
-        self.padding = win_size * (frame_num // 2) + self.win_size * 2  # Output results file size for hearing test
-        self.truncate = truncate
+        self.padding = win_size * (frame_num // 2)  # Output results file size for hearing test
 
         speaker_dir = [f.path for f in os.scandir(self.path) if f.is_dir()]
 
@@ -37,18 +34,9 @@ class Data:
             segment_name.remove(one_path)  # Delete too small segment
 
         self.file_name = segment_name[:self.number_file]  # LibriSpeech file path
-        self.regularization = 0  # -1.0 ~ +1.0
         self.y_data = None  # Dynamic for noise addition
 
-    def rnn_shape(self, wave):  # (frame_num, N // 2) -> (frame_num // truncate, 1, truncate, N // 2)
-        spectrum = librosa.stft(wave, n_fft=self.n_fft, hop_length=self.win_size // 2, win_length=self.win_size,
-                                window='cosine', center=False)[1:, :self.frame_num]  # (n_fft/2, frame_num-3), cut DC
-        spectrum = np.transpose(spectrum, (1, 0))
-        spectrum = np.reshape(spectrum, (self.frame_num // self.truncate, 1, self.truncate, self.n_fft // 2))
-
-        return spectrum
-
-    def rnn_spectrogram(self, file_number):  # Load LibriSpeech dataset
+    def load_wave(self, file_number):  # Load LibriSpeech dataset
         print("Loading file_" + str(file_number) + ": ", self.file_name[file_number])
         wave, sr = librosa.load(self.file_name[file_number], sr=self.sr)
         if wave.shape[0] >= self.padding:
@@ -57,66 +45,47 @@ class Data:
         else:
             wave = np.concatenate((wave, np.zeros(self.padding - wave.shape[0])), axis=0)
 
-        spectrum = self.rnn_shape(wave)
+        wave = np.expand_dims(wave, axis=0)
+        return wave
 
-        return spectrum
-
-    def load_data(self, noise=None, noise_snr=5):  # Return real and imaginary spectrum array
+    def load_data(self, noise=None, noise_snr=5):  # return wave dataset
         if self.y_data is None:  # Dynamic for noise addition
-            data = self.rnn_spectrogram(0)
+            data = self.load_wave(0)
 
             for i in range(1, self.number_file):
-                temp = self.rnn_spectrogram(i)
-                data = np.concatenate((data, temp), axis=1)  # spectrogram
+                temp = self.load_wave(i)
+                data = np.concatenate((data, temp), axis=0)
 
-            res = data[:, :self.batch_size]  # Cut to batch size
-            for i in range(1, data.shape[1] // self.batch_size):
-                res_temp = data[:, self.batch_size*i:self.batch_size*(i+1)]
-                res = np.concatenate((res, res_temp), axis=0)
-
-            self.y_data = np.copy(res)
+            self.y_data = np.copy(data)
 
         res = np.copy(self.y_data)
 
         if noise is not None:
-            # res += noise
-            for i in range(0, res.shape[0], self.frame_num//self.truncate):
-                for j in range(self.batch_size):
-                    scale = adjust_snr(res[i:i+self.frame_num//self.truncate, j],
-                                       noise[i:i+self.frame_num//self.truncate, j], noise_snr)
-                    res[i:i+self.frame_num//self.truncate, j] += noise[i:i+self.frame_num//self.truncate, j] * scale
+            for i in range(self.number_file):
+                scale = adjust_snr(res[i], noise[i], noise_snr)
+                res[i] += noise[i] * scale
 
-        data_real = res.real.astype(np.float32)
-        data_imag = res.imag.astype(np.float32)
-
-        real_max = max(np.abs(np.max(data_real)), np.abs(np.min(data_real)))
-        imag_max = max(np.abs(np.max(data_imag)), np.abs(np.min(data_imag)))
-        val_max = max(real_max, imag_max)  # -1.0 ~ +1.0
-        if val_max > self.regularization:
-            self.regularization = val_max  # Update regularization
-
-        return data_real, data_imag
+        return res
 
     def make_noise(self, noise_name: str):  # Load Demand datasets
-        res_temp = None
-        for i in range(self.batch_size):
+        res = None
+        for i in range(16):  # There are 16 files in a folder
             if i < 9:
                 path = '..\\dataset\\demand\\' + noise_name + '\\ch0' + str(i+1) + '.wav'
             else:
                 path = '..\\dataset\\demand\\' + noise_name + '\\ch' + str(i+1) + '.wav'
-                # There are 16 files in a folder
 
             print('Loading noise file: ' + path)
-            noise, sr = librosa.load(path, sr=self.sr)[:self.padding]  # Every Demand dataset files are big enough
-            noise = self.rnn_shape(noise)
+            noise, sr = librosa.load(path, sr=self.sr)  # Every Demand dataset files are big enough
+            noise = np.expand_dims(noise[:self.padding], axis=0)
 
             if i == 0:
-                res_temp = noise
+                res = noise
             else:
-                res_temp = np.concatenate((res_temp, noise), axis=1)
+                res = np.concatenate((res, noise), axis=0)
 
-        res = res_temp
-        for _ in range(1, self.number_file // self.batch_size):  # For matching shape with y_data
+        res_temp = np.copy(res)
+        for _ in range(1, self.number_file // 16):  # For matching shape with y_data
             res = np.concatenate((res, res_temp), axis=0)
 
         return res
