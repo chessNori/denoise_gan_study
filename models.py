@@ -1,5 +1,5 @@
 import tensorflow as tf
-from tensorflow.keras.layers import GRU, Dense, TimeDistributed
+from tensorflow.keras.layers import GRU, Dense, TimeDistributed, Conv1D, Flatten
 from tensorflow.keras import Model
 
 
@@ -28,9 +28,9 @@ class GeneratorModel(Model):
         return x
 
 
-class GAN(Model):
+class WaveGenerator(Model):
     def __init__(self, n_fft, win_size):
-        super(GAN, self).__init__()
+        super(WaveGenerator, self).__init__()
         self.n_fft = n_fft
         self.win_size = win_size
 
@@ -45,3 +45,49 @@ class GAN(Model):
         x = tf.signal.inverse_stft(x, self.win_size, self.win_size // 2, self.n_fft, window_fn=tf.signal.hann_window)
 
         return x
+
+
+class DiscriminatorModel(Model):
+    def __init__(self):
+        super(DiscriminatorModel, self).__init__()
+        self.conv1 = Conv1D(8, 5, activation='tanh')
+        self.conv2 = Conv1D(16, 5, activation='tanh')
+        self.conv3 = Conv1D(8, 3, activation='tanh')
+        self.flatten = Flatten()
+        self.d = Dense(40, activation='tanh')
+        self.result = Dense(1, activation='sigmoid')
+
+    def call(self, inputs):
+        x = tf.expand_dims(inputs, axis=-1)
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = self.conv3(x)
+        x = self.flatten(x)
+        x = self.d(x)
+        x = self.result(x)
+
+        return x
+
+
+class GAN(Model):
+    def __init__(self, n_fft, win_size):
+        super(GAN, self).__init__()
+        self.n_fft = n_fft
+        self.win_size = win_size
+        self.generator = WaveGenerator(n_fft, win_size)
+        self.discriminator = DiscriminatorModel()
+
+    def call(self, inputs_real, inputs_imag, generator_train, inputs_origin=None):
+        if generator_train:
+            denoise = self.generator(inputs_real, inputs_imag)
+            x = self.discriminator(denoise)
+            return denoise, x
+        else:
+            if inputs_origin is None:
+                inputs = tf.dtypes.complex(inputs_real, inputs_imag)
+                inputs = tf.signal.inverse_stft(inputs, self.win_size, self.win_size // 2, self.n_fft,
+                                                window_fn=tf.signal.hann_window)
+            else:
+                inputs = inputs_origin
+            x = self.discriminator(inputs)
+            return x

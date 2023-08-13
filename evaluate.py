@@ -4,11 +4,13 @@ import soundfile as sf
 import os
 
 
-def print_loss(table, table_name, label_name):
-    plt.plot(table)
+def print_loss(table_train, table_test, table_name):
+    plt.plot(table_train, 'g', label="Train")
+    plt.plot(table_test, 'b', label="Test")
     plt.title(table_name)
     plt.xlabel('Epoch')
-    plt.ylabel(label_name)
+    plt.ylabel('Loss')
+    plt.legend()
     plt.show()
 
 
