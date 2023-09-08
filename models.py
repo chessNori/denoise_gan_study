@@ -11,9 +11,9 @@ class GeneratorModel(Model):
         self.output_num = (n_fft // 2) + 1
 
         self.e_gru = GRU(self.output_num, return_sequences=True)  # Encoder
-        self.e_d = TimeDistributed(Dense(80, activation='tanh'))
+        self.e_d = TimeDistributed(Dense(60, activation='tanh'))
         self.l_d = TimeDistributed(Dense(40, activation='tanh'))  # Latent
-        self.d_d = TimeDistributed(Dense(80, activation='tanh'))  # Decoder
+        self.d_d = TimeDistributed(Dense(60, activation='tanh'))  # Decoder
         self.d_gru = GRU(self.output_num, return_sequences=True)
         self.d_output = TimeDistributed(Dense(self.output_num))
 
@@ -55,8 +55,8 @@ class WaveGenerator(Model):
 class DiscriminatorModel(Model):
     def __init__(self):
         super(DiscriminatorModel, self).__init__()
-        self.conv1 = Conv1D(8, 15, activation='relu')
-        self.conv2 = Conv1D(8, 15, activation='relu')
+        self.conv1 = Conv1D(4, 15, activation='relu')
+        self.conv2 = Conv1D(4, 7, activation='relu')
         self.conv3 = Conv1D(1, 5, activation='relu')
         self.flatten = Flatten()
         self.d = Dense(40, activation='relu')

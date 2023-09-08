@@ -9,18 +9,18 @@ import os
 
 batch_size = 16
 number_batch = 8
-lr = 1e-4
+lr = 2e-4
 LAMBDA = 10
-pre_train_stop = 0.01
-EPOCHS = 10
+pre_train_stop = 0.007
+EPOCHS = 30
 N_FFT = 160
 WIN_SIZE = 160  # 10ms
 SNR = 10
-test_pick = [False, False, False, False]  # [Make result wav file, Calculate SNR, Make x, y wav file, Load pre_weights]
+test_pick = [False, False, False, True]  # [Make result wav file, Calculate SNR, Make x, y wav file, Load pre_weights]
 save_scale = 2
 save_time = dt.datetime.now()
 save_time = save_time.strftime("%Y%m%d%H%M")
-# save_time = "202308140438"
+save_time = "202309051656"
 npy_path = '..\\results\\npy_backup\\spec_only_g\\' + save_time
 save_path_base = '..\\results\\saved_model\\spec_only_g\\' + save_time
 save_path_g = save_path_base + '\\_model_g'
@@ -32,8 +32,8 @@ noise_list = ['DKITCHEN','NFIELD']  # Noise folder Names
 if test_pick[0]:
     evaluate.backup_test(npy_path, save_time, save_scale, len(noise_list), 0, not test_pick[1])
     # load_path, path_time, scale, number_noise, test_number, end
-# else:
-#     os.makedirs(npy_path, exist_ok=True)
+else:
+    os.makedirs(npy_path, exist_ok=True)
 
 _start = time.time()
 data = load_data.Data(batch_size * number_batch, WIN_SIZE)
@@ -111,10 +111,9 @@ save_path_pre_g = '..\\results\\saved_model\\spec_only_g\\pre_training\\_model_p
 generator_g = models.WaveGenerator(N_FFT, WIN_SIZE)  # Denoise model
 generator_f = models.WaveGenerator(N_FFT, WIN_SIZE)  # Add noise model
 
-# if test_pick[3]:
-#     _model.generator.load_weights(save_path_pre_g)
-#     # _model.generator.load_weights(save_path_g)
-#     # _model.discriminator.load_weights(save_path_d)
+if test_pick[3]:
+    # generator_g.load_weights(save_path_pre_g)
+    generator_g.load_weights(save_path_g)
 
 single_optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
 # single_loss_object = tf.keras.losses.MeanSquaredError()
@@ -145,7 +144,7 @@ def single_test_step(noisy_wave, original_wave):
 
 
 def pre_training(train_dataset, test_dataset):
-    for epoch in range(EPOCHS):
+    for epoch in range(100):
         start = time.time()
         train_loss.reset_state()
         test_loss.reset_state()
@@ -273,6 +272,8 @@ def gan_learning(train_dataset, test_dataset):
 
     for epoch in range(EPOCHS):
         start = time.time()
+        time_indicator = dt.datetime.now()
+        time_indicator = start.strftime("%d%H%M")
         gen_g_train_loss.reset_state()
         gen_f_train_loss.reset_state()
         disc_x_train_loss.reset_state()
@@ -291,7 +292,7 @@ def gan_learning(train_dataset, test_dataset):
         test_snr /= n
 
         print(
-            f'Epoch {epoch + 1}:\n'
+            f'Epoch {epoch + 1}({time_indicator}):\n'
             f'Generator G Loss: {gen_g_train_loss.result()}, '
             f'Generator F Loss: {gen_f_train_loss.result()}, '
             f'Discriminator X Loss: {disc_x_train_loss.result()}, '
@@ -304,6 +305,9 @@ def gan_learning(train_dataset, test_dataset):
         table_temp_test.append(test_loss.result())
         table_temp_snr.append(test_snr)
 
+        if test_snr > 5.0:
+            break
+
     evaluate.print_loss(table_temp_train, table_temp_test, 'MSE Graph')
     evaluate.print_snr_graph(table_temp_snr)
 
@@ -311,9 +315,26 @@ def gan_learning(train_dataset, test_dataset):
 print("Start training.")
 gan_learning(_train_dataset, _test_dataset)
 
-# os.makedirs(save_path_base, exist_ok=True)
 
-# evaluate.backup_test(npy_path, save_time, save_scale, len(noise_list), 0, False)
+def test(test_dataset):
+    i = 0
+    res = None
+    for x_wave, y_wave in test_dataset:
+        res_temp = single_test_step(x_wave, y_wave)
+        res_temp = np.expand_dims(res_temp, axis=0)
+        if i == 0:
+            res = np.copy(res_temp)
+        else:
+            res = np.concatenate((res, res_temp), axis=0)
+        i += 1
+
+    np.save(npy_path + '\\result_backup.npy', res)
+
+
+test(_test_dataset)
+os.makedirs(save_path_base, exist_ok=True)
+
+evaluate.backup_test(npy_path, save_time, save_scale, len(noise_list), 0, False)
 # load_path, path_time, scale, number_noise, test_number, end
 
-# generator_g.save_weights(save_path_g)
+generator_g.save_weights(save_path_g)
