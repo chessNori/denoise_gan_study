@@ -1,5 +1,5 @@
 import tensorflow as tf
-from tensorflow.keras.layers import GRU, Dense, TimeDistributed, Conv1D, Flatten
+from tensorflow.keras.layers import GRU, Dense, TimeDistributed, Conv2D, Flatten
 from tensorflow.keras import Model
 
 
@@ -11,19 +11,21 @@ class GeneratorModel(Model):
         self.output_num = (n_fft // 2) + 1
 
         self.e_gru = GRU(self.output_num, return_sequences=True)  # Encoder
-        self.e_d = TimeDistributed(Dense(128, activation='tanh'))
-        self.l_d = TimeDistributed(Dense(50, activation='tanh'))  # Latent
-        self.d_d = TimeDistributed(Dense(128, activation='tanh'))  # Decoder
+        self.e_d1 = TimeDistributed(Dense(80, activation='tanh'))
+        self.e_d2 = TimeDistributed(Dense(50, activation='tanh'))
+        self.l_d = TimeDistributed(Dense(25, activation='tanh'))  # Latent
+        self.d_d1 = TimeDistributed(Dense(80, activation='tanh'))  # Decoder
+        self.d_d2 = TimeDistributed(Dense(50, activation='tanh'))
         self.d_gru = GRU(self.output_num, return_sequences=True)
-        self.d_output = TimeDistributed(Dense(self.output_num))
 
     def call(self, inputs):
         x = self.e_gru(inputs)
-        x = self.e_d(x)
+        x = self.e_d1(x)
+        x = self.e_d2(x)
         x = self.l_d(x)
-        x = self.d_d(x)
+        x = self.d_d1(x)
+        x = self.d_d2(x)
         x = self.d_gru(x)
-        x = self.d_output(x)
 
         return x
 
@@ -41,77 +43,31 @@ class WaveGenerator(Model):
         x_real = self.model_real(inputs_real)
         x_imag = self.model_imag(inputs_imag)
 
-        x = tf.dtypes.complex(x_real, x_imag)
-        x = tf.signal.inverse_stft(x, self.win_size, self.win_size // 2, self.n_fft, window_fn=tf.signal.hann_window)
+        x_disc_input = tf.dtypes.complex(x_real, x_imag)
+        x = tf.signal.inverse_stft(x_disc_input, self.win_size, self.win_size // 2,
+                                   self.n_fft, window_fn=tf.signal.hann_window)
 
-        return x
+        return x, x_real, x_imag
 
-
-# class DiscriminatorModel(Model):
-#     def __init__(self):
-#         super(DiscriminatorModel, self).__init__()
-#         self.conv1 = Conv1D(16, 31, activation='relu')
-#         self.conv2 = Conv1D(8, 15, activation='relu')
-#         self.conv3 = Conv1D(4, 7, activation='relu')
-#         self.conv4 = Conv1D(1, 5, activation='relu')
-#         self.flatten = Flatten()
-#         self.d = Dense(40, activation='relu')
-#         self.result = Dense(1, activation='sigmoid')
-#
-#     def call(self, inputs):
-#         x = tf.expand_dims(inputs, axis=-1)
-#         x = self.conv1(x)
-#         x = self.conv2(x)
-#         # x = self.conv3(x)
-#         x = self.conv4(x)
-#         x = self.flatten(x)
-#         x = self.d(x)
-#         x = self.result(x)
-#
-#         return x
-
-
-class DiscriminatorModel(Model):
+class Discriminator(Model):
     def __init__(self):
-        super(DiscriminatorModel, self).__init__()
-        self.gru = GRU(160, return_sequences=True)
-        self.d1 = TimeDistributed(Dense(80, activation='tanh'))
-        self.gru2 = GRU(40)
-        self.d = Dense(40, activation='tanh')
-        self.result = Dense(1, activation='sigmoid')
+        super(Discriminator, self).__init__()
+        self.conv1 = Conv2D(4, (9, 5), activation='relu')
+        self.conv2 = Conv2D(8, (9, 5), activation='relu')
+        self.conv3 = Conv2D(4, (9, 5), activation='relu')
+        self.flatten = Flatten()
+        self.d1 = Dense(50, activation='relu')
+        self.d_out = Dense(1, activation='sigmoid')
 
-    def call(self, inputs):
-        x = self.gru(inputs)
+    def call(self, inputs_real, inputs_imag):
+        x = tf.dtypes.complex(inputs_real, inputs_imag)
+        x = tf.math.abs(x)
+        x = tf.expand_dims(x, axis=-1)
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = self.conv3(x)
+        x = self.flatten(x)
         x = self.d1(x)
-        x = self.gru2(x)
-        x = self.d(x)
-        x = self.result(x)
+        x = self.d_out(x)
 
         return x
-
-
-class GAN(Model):
-    def __init__(self, n_fft, win_size):
-        super(GAN, self).__init__()
-        self.n_fft = n_fft
-        self.win_size = win_size
-        self.generator = WaveGenerator(n_fft, win_size)
-        self.discriminator = DiscriminatorModel()
-
-    def call(self, inputs_real, inputs_imag, generator_train, inputs_origin=None):
-        if generator_train:
-            denoise = self.generator(inputs_real, inputs_imag)
-            x = tf.reshape(denoise, (16, 320, -1))
-            x = self.discriminator(x)
-            return denoise, x
-        else:
-            if inputs_origin is None:
-                inputs = tf.dtypes.complex(inputs_real, inputs_imag)
-                inputs = tf.signal.inverse_stft(inputs, self.win_size, self.win_size // 2, self.n_fft,
-                                                window_fn=tf.signal.hann_window)
-                inputs = tf.reshape(inputs, (16, 320, -1))
-            else:
-                inputs = inputs_origin
-                inputs = tf.reshape(inputs, (16, 320, -1))
-            x = self.discriminator(inputs)
-            return x

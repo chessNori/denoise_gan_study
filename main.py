@@ -6,23 +6,26 @@ import tensorflow as tf
 import models
 import datetime as dt
 import os
+import gc
 
 batch_size = 16
 number_batch = 4
-gen_lr = 1e-4
+gen_lr = 5e-3
 disc_lr = 1e-4
-single_lr = 1e-4
+single_lr = 5e-3
+id_imp = 4.0
 EPOCHS = 1000
-pre_training_stop = 7.1e-4
-phase_shift_loss = 0.005
-N_FFT = 512
-WIN_SIZE = 320  # 20ms
+pre_training_stop = 8.0
+gan_stop = 40.0
+N_FFT = 160
+WIN_SIZE = 160  # 20ms
 SNR = 5
-test_pick = [False, False, False, False]  # [Make result wav file, Calculate SNR, Make x, y wav file, Load pre_weights]
+test_pick = [False, False, False, False, True]
+# [Make result wav file, Calculate SNR, Make x, y wav file, Load pre_weights, Load GAN weights]
 save_scale = 2
 save_time = dt.datetime.now()
 save_time = save_time.strftime("%Y%m%d%H%M")
-# save_time = "202308140438"
+save_time = "202309111330"
 npy_path = '..\\results\\npy_backup\\spec_only_g\\' + save_time
 save_path_base = '..\\results\\saved_model\\spec_only_g\\' + save_time
 save_path_g = save_path_base + '\\_model_g'
@@ -92,116 +95,151 @@ x_data_test = tf.signal.stft(x_data_test, WIN_SIZE, WIN_SIZE//2, N_FFT, window_f
 x_data_real_test = tf.math.real(x_data_test)
 x_data_imag_test = tf.math.imag(x_data_test)
 
+y_data = tf.signal.stft(y_data, WIN_SIZE, WIN_SIZE//2, N_FFT, window_fn=tf.signal.hann_window)
+y_data_real = tf.math.real(y_data)
+y_data_imag = tf.math.imag(y_data)
+y_data_test = tf.signal.stft(y_data_test, WIN_SIZE, WIN_SIZE//2, N_FFT, window_fn=tf.signal.hann_window)
+y_data_real_test = tf.math.real(y_data_test)
+y_data_imag_test = tf.math.imag(y_data_test)
 
-# def regularization(x, reg_val):
-#     reg_temp = max(tf.experimental.numpy.max(x), abs(tf.experimental.numpy.min(x)))
-#     if reg_temp > reg_val:
-#         return reg_temp
-#     else:
-#         return reg_val
-#
-#
-# reg = 0.
-# reg = regularization(x_data_real, reg)
-# reg = regularization(x_data_imag, reg)
-# reg = regularization(x_data_real_test, reg)
-# reg = regularization(x_data_imag_test, reg)
-#
-# x_data_real = tf.experimental.numpy.divide(x_data_real, reg)
-# x_data_imag = tf.experimental.numpy.divide(x_data_imag, reg)
-# x_data_real_test = tf.experimental.numpy.divide(x_data_real_test, reg)
-# x_data_imag_test = tf.experimental.numpy.divide(x_data_imag_test, reg)
+
+def regularization(x, reg_val):
+    reg_temp = max(tf.experimental.numpy.max(x), abs(tf.experimental.numpy.min(x)))
+    if reg_temp > reg_val:
+        return reg_temp
+    else:
+        return reg_val
+
+
+reg = 0.
+reg = regularization(x_data_real, reg)
+reg = regularization(x_data_imag, reg)
+reg = regularization(x_data_real_test, reg)
+reg = regularization(x_data_imag_test, reg)
+
+x_data_real = tf.experimental.numpy.divide(x_data_real, reg)
+x_data_imag = tf.experimental.numpy.divide(x_data_imag, reg)
+x_data_real_test = tf.experimental.numpy.divide(x_data_real_test, reg)
+x_data_imag_test = tf.experimental.numpy.divide(x_data_imag_test, reg)
+
+reg = 0.
+reg = regularization(y_data_real, reg)
+reg = regularization(y_data_imag, reg)
+reg = regularization(y_data_real_test, reg)
+reg = regularization(y_data_imag_test, reg)
+
+y_data_real = tf.experimental.numpy.divide(y_data_real, reg)
+y_data_imag = tf.experimental.numpy.divide(y_data_imag, reg)
+y_data_real_test = tf.experimental.numpy.divide(y_data_real_test, reg)
+y_data_imag_test = tf.experimental.numpy.divide(y_data_imag_test, reg)
+
+y_data = tf.dtypes.complex(y_data_real, y_data_imag)
+y_data = tf.signal.inverse_stft(y_data, WIN_SIZE, WIN_SIZE // 2, N_FFT, window_fn=tf.signal.hann_window)
+
+y_data_test = tf.dtypes.complex(y_data_real_test, y_data_imag_test)
+y_data_test = tf.signal.inverse_stft(y_data_test, WIN_SIZE, WIN_SIZE // 2, N_FFT, window_fn=tf.signal.hann_window)
+
+save_scale *= (reg * 2)
 
 print("Data Loading is Done! (", time.time() - _start, ")")
-print('Shape of train data(x,y):', x_data_real.shape, y_data.shape)
-print('Shape of test data(x,y):', x_data_real_test.shape, y_data_test.shape)
+print('Shape of train data(x,y):', x_data_real.shape, y_data_real.shape)
+print('Shape of test data(x,y):', x_data_real_test.shape, y_data_real_test.shape)
 
-_train_dataset = tf.data.Dataset.from_tensor_slices((x_data_real, x_data_imag, y_data)).shuffle(100).batch(batch_size)
-_test_dataset = tf.data.Dataset.from_tensor_slices((x_data_real_test, x_data_imag_test, y_data_test)).batch(batch_size)
+_train_dataset = tf.data.Dataset.from_tensor_slices(
+    (x_data_real, x_data_imag, y_data_real, y_data_imag, y_data)).shuffle(100).batch(batch_size)
+_test_dataset = tf.data.Dataset.from_tensor_slices(
+    (x_data_real_test, x_data_imag_test, y_data_real_test, y_data_imag_test, y_data_test)).batch(batch_size)
 
 save_path_pre_g = '..\\results\\saved_model\\spec_only_g\\pre_training\\_model_pre_g'
-_model = models.GAN(N_FFT, WIN_SIZE)
 
-if test_pick[3]:
-    _model.generator.load_weights(save_path_pre_g)
-    # _model.generator.load_weights(save_path_g)
-    # _model.discriminator.load_weights(save_path_d)
+del SNR
+del _
+del _start
+del data
+del noise_temp
+del x_data_temp
+del y_data_temp
+
+gc.collect()
+
+_model = models.WaveGenerator(N_FFT, WIN_SIZE)
+_model_d = models.Discriminator()
+
+if test_pick[3] or test_pick[4]:
+    if test_pick[4]:
+        _model.load_weights(save_path_g)
+        _model_d.load_weights(save_path_d)
+    else:
+        _model.load_weights(save_path_pre_g)
 
 optimizer = tf.keras.optimizers.Adam(learning_rate=single_lr)
 loss_object = tf.keras.losses.MeanSquaredError()
 # loss_object = tf.keras.losses.MeanAbsoluteError()
+gen_optimizer = tf.keras.optimizers.Adam(learning_rate=gen_lr)
+disc_optimizer = tf.keras.optimizers.Adam(learning_rate=disc_lr)
+cross_entropy = tf.keras.losses.BinaryCrossentropy()
+real_disc_accuracy = tf.keras.metrics.BinaryAccuracy(name='real discriminator accuracy')
+fake_disc_accuracy = tf.keras.metrics.BinaryAccuracy(name='fake discriminator accuracy')
 
-train_loss = tf.keras.metrics.Mean(name='train_loss')
-test_loss = tf.keras.metrics.Mean(name='test_loss')
 
 
 @tf.function
 def single_train_step(noisy_wave_real, noisy_wave_imag, original_wave):
     with tf.GradientTape() as tape:
-        denoise_wave = _model.generator(noisy_wave_real, noisy_wave_imag, training=True)
+        denoise_wave, r_, i_ = _model(noisy_wave_real, noisy_wave_imag, training=True)
         loss = loss_object(original_wave, denoise_wave)
     gradients = tape.gradient(loss, _model.trainable_variables)
     optimizer.apply_gradients(zip(gradients, _model.trainable_variables))
 
-    train_loss(loss)
-    # return denoise_wave
-
 
 @tf.function
 def single_test_step(noisy_wave_real, noisy_wave_imag, original_wave):
-    denoise_wave = _model.generator(noisy_wave_real, noisy_wave_imag, training=False)
+    denoise_wave, r_, i_ = _model(noisy_wave_real, noisy_wave_imag, training=False)
     loss = loss_object(original_wave, denoise_wave)
-    test_loss(loss)
 
     return denoise_wave
 
 
-def test(train_dataset, test_dataset):
+def pre_training(train_dataset, test_dataset):
     for epoch in range(EPOCHS):
         start = time.time()
-        train_loss.reset_state()
-        test_loss.reset_state()
 
-        for x_real, x_imag, y in train_dataset:
-            single_train_step(x_real, x_imag, y)
+        for x_real, x_imag, y_real, y_imag, y_wave in train_dataset:
+            single_train_step(x_real, x_imag, y_wave)
 
         test_snr = 0.
         i = 0
-        for x_real, x_imag, y in test_dataset:
-            temp = single_test_step(x_real, x_imag, y)
-            test_snr += evaluate.snr(y, temp)
+        for x_real, x_imag, y_real, y_imag, y_wave in test_dataset:
+            temp = single_test_step(x_real, x_imag, y_wave)
+            test_snr += evaluate.snr(y_wave, temp)
             i += 1
         test_snr /= i
 
         print(
             f'Epoch {epoch + 1}, '
-            f'Train Loss: {train_loss.result()}, '
-            f'Test Loss: {test_loss.result()}, '
             f'Test SNR: {test_snr:.3f}dB, '
             f'Time: {time.time() - start} sec'
         )
 
-        if test_loss.result() < pre_training_stop:
+        if test_snr > pre_training_stop:
             print("Early stop!")
             break
 
 
-if not test_pick[3]:
+if not test_pick[3] and not test_pick[4]:
     print("Start pre-training.")
-    test(_train_dataset, _test_dataset)
-#     _model.generator.save_weights(save_path_pre_g)
-
-gen_optimizer = tf.keras.optimizers.Adam(learning_rate=gen_lr)
-disc_optimizer = tf.keras.optimizers.Adam(learning_rate=disc_lr)
-cross_entropy = tf.keras.losses.BinaryCrossentropy()
-reference_loss = tf.keras.metrics.Mean(name='reference_loss')  # loss for starting single train phase
+    pre_training(_train_dataset, _test_dataset)
+    _model.save_weights(save_path_pre_g)
 
 
 def discriminator_loss(real_output, fake_output):
     real_loss = cross_entropy(tf.ones_like(real_output), real_output)  # un_noisy percent
     fake_loss = cross_entropy(tf.zeros_like(fake_output), fake_output)
     total_loss = real_loss + fake_loss
-    total_loss /= 2.0
+    total_loss
+
+    real_disc_accuracy(tf.ones_like(real_output), real_output)
+    fake_disc_accuracy(tf.zeros_like(fake_output), fake_output)
     return total_loss
 
 
@@ -209,126 +247,81 @@ def generator_loss(fake_output):
     return cross_entropy(tf.ones_like(fake_output), fake_output)
 
 
-def gan_train_step(noisy_wave_real, noisy_wave_imag, original_wave, train_generator):
-    if train_generator:  # Generator training phase
-        with tf.GradientTape() as tape:
-            generated_wave, fake_output = _model(noisy_wave_real, noisy_wave_imag, train_generator, training=True)
+def identity_loss(real, same):
+    loss = tf.reduce_mean(tf.abs(real - same))
+    return loss * id_imp
 
-            gen_loss = generator_loss(fake_output)
 
-        gradients = tape.gradient(gen_loss, _model.trainable_variables)
-        gen_optimizer.apply_gradients(zip(gradients, _model.trainable_variables))
-        train_loss(gen_loss)
-    else:  # Discriminator training phase
-        with tf.GradientTape() as tape:
-            real_output = _model(None, None, train_generator, inputs_origin=original_wave, training=True)
-            generated_wave, fake_output = _model(noisy_wave_real, noisy_wave_imag, not train_generator, training=True)
+@tf.function
+def gan_train_step(real_x, imag_x, real_y, imag_y, wave_y):
+    with tf.GradientTape(persistent=True) as tape:
+        generated_wave, generated_real, generated_imag = _model(real_x, imag_x, training=True)
+        same_wave, _r, _i = _model(real_y, imag_y, training=True)
 
-            disc_loss = discriminator_loss(real_output, fake_output)
+        real_output = _model_d(generated_real, generated_imag, training=True)
+        fake_output = _model_d(real_y, imag_y, training=True)
 
-        gradients = tape.gradient(disc_loss, _model.trainable_variables)
-        disc_optimizer.apply_gradients(zip(gradients, _model.trainable_variables))
-        train_loss(disc_loss)
+        gen_loss = \
+            generator_loss(fake_output) + identity_loss(wave_y, same_wave) + identity_loss(wave_y, generated_wave)
+        disc_loss = discriminator_loss(real_output, fake_output)
+    gen_gradients = tape.gradient(gen_loss, _model.trainable_variables)
+    disc_gradients = tape.gradient(disc_loss, _model_d.trainable_variables)
 
-    loss = loss_object(original_wave, generated_wave)
-    reference_loss(loss)  # loss of generator
+    gen_optimizer.apply_gradients(zip(gen_gradients, _model.trainable_variables))
+    disc_optimizer.apply_gradients(zip(disc_gradients, _model_d.trainable_variables))
 
 
 def gan_learning(train_dataset, test_dataset):
-    table_temp_train = []
-    table_temp_test = []
-    # single_phase = False
-    bad_generator = False  # For changing training phase(Discriminator training first)
-    res = None
-    count = 4
-    # threshold = phase_shift_loss
-    table_temp_snr = []
+    real_disc_accuracy.reset_state()
+    fake_disc_accuracy.reset_state()
 
     for epoch in range(EPOCHS):
-        start = time.time()
-
-        train_loss.reset_state()
-        test_loss.reset_state()
-        reference_loss.reset_state()
-        _model.generator.trainable = bad_generator
-        _model.discriminator.trainable = not bad_generator
-
-        for x_real, x_imag, y in train_dataset:
-            # if single_phase:
-            #     single_train_step(x_real, x_imag, y)
-            # else:
-            #     gan_train_step(x_real, x_imag, y, bad_generator)
-            gan_train_step(x_real, x_imag, y, bad_generator)
+        for x_real, x_imag, y_real, y_imag, y_wave in train_dataset:
+            gan_train_step(x_real, x_imag, y_real, y_imag, y_wave)
 
         test_snr = 0.
         i = 0
-        for x_real, x_imag, y in test_dataset:
-            res_temp = single_test_step(x_real, x_imag, y)
-            test_snr += evaluate.snr(y, res_temp)
-
-            # if ((epoch > EPOCHS - 10) and single_phase) or (epoch == EPOCHS - 2):
-            if epoch > 5 and table_temp_snr[-1] > 6.2:
-                res_temp = np.expand_dims(res_temp, axis=0)
-                if i == 0:
-                    res = res_temp
-                else:
-                    res = np.concatenate((res, res_temp), axis=0)
-
+        for x_real, x_imag, y_real, y_imag, y_wave in test_dataset:
+            temp = single_test_step(x_real, x_imag, y_wave)
+            test_snr += evaluate.snr(y_wave, temp)
             i += 1
-        test_snr /= i
-        table_temp_train.append(train_loss.result())
-        table_temp_test.append(test_loss.result())
-        table_temp_snr.append(test_snr)
 
-        print(f'Epoch {epoch + 1} (', end='')
-        # if single_phase:
-        #     print("Single train phase)")
-        #     single_phase = False
-        # elif bad_generator:
-        if bad_generator:
-            print("Generator train phase)")
-            if table_temp_snr[-2] > table_temp_snr[-1]:
-                count = 2
-                bad_generator = not bad_generator
-                # threshold /= 1.1
-            # else:
-            #     single_phase = True
+        end_time = dt.datetime.now()
+        end_time = end_time.strftime("%H:%M")
+        print(f'Epoch {epoch + 1} ({end_time})\n'
+              f'Test SNR: {test_snr:.3f}dB, '
+              f'Real Accuracy: {real_disc_accuracy.result() * 100:.3f}%, '
+              f'Fake Accuracy: {fake_disc_accuracy.result() * 100: 3f}%')
 
-            # bad_generator = not bad_generator
-        else:
-            print("Discriminator train phase)")
-            # if (train_loss.result() != 0.) and (train_loss.result() < threshold):
-            #     bad_generator = not bad_generator  # Changing phase
-            count -= 1
-            if count == 0 or train_loss.result() < 0.3:
-                # count = 2
-                bad_generator = not bad_generator
-
-        print(
-            f'Real: GAN Train Loss(Cross Entropy): {train_loss.result()}, '
-            f'GAN Train Error: {reference_loss.result()}, '
-            f'Test Error: {test_loss.result()}, '
-            f'Test SNR: {test_snr:.3f}dB, '
-            f'Time: {time.time() - start} sec'
-        )
-
-        if res is not None:
-            print("Early stop!")
-            print("Save numpy files...")
-            np.save(npy_path + '\\result_backup.npy', res)
+        if test_snr > gan_stop:
             break
-
-    evaluate.print_loss(table_temp_train, table_temp_test, 'MSE Graph')
-    evaluate.print_snr_graph(table_temp_snr)
 
 
 print("Start training.")
 gan_learning(_train_dataset, _test_dataset)
 
+print("End!")
+_model.save_weights(save_path_g)
+_model_d.save_weights(save_path_d)
+
+
+def test(test_dataset):
+    i = 0
+    res = None
+    for x_real, x_imag, y_real, y_imag, y_wave in test_dataset:
+        res_temp = single_test_step(x_real, x_imag, y_wave)
+        res_temp = np.expand_dims(res_temp, axis=0)
+        if i == 0:
+            res = np.copy(res_temp)
+        else:
+            res = np.concatenate((res, res_temp), axis=0)
+        i += 1
+
+    np.save(npy_path + '\\result_backup.npy', res)
+
+
+test(_test_dataset)
 os.makedirs(save_path_base, exist_ok=True)
 
 evaluate.backup_test(npy_path, save_time, save_scale, len(noise_list), 0, False)
 # load_path, path_time, scale, number_noise, test_number, end
-
-_model.generator.save_weights(save_path_g)
-_model.discriminator.save_weights(save_path_d)
